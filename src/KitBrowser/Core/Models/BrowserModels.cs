@@ -613,7 +613,7 @@ public sealed class BrowserSettings
     public string? AppLockPinHash { get; set; }
     public bool RequirePinOnStartup { get; set; }
     public bool AutoCheckUpdates { get; set; } = true;
-    public string UpdateFeedUrl { get; set; } = "https://github.com/billythestudent/kite";
+    public string UpdateFeedUrl { get; set; } = "https://github.com/luqisdev/kite";
     public List<SpeedDialItem> SpeedDial { get; set; } =
     [
         new() { Id = "sd1", Title = "Google", Url = "https://www.google.com" },
