@@ -733,6 +733,52 @@ public sealed class TabHostController : IDisposable
         }
     }
 
+    public async Task<bool> ToggleMediaPlayPauseAsync(TabItemModel tab)
+    {
+        if (!_views.TryGetValue(tab.Id, out var view) || view.CoreWebView2 is null)
+            return false;
+
+        try
+        {
+            var res = await view.CoreWebView2.ExecuteScriptAsync("""
+                (() => {
+                    const media = Array.from(document.querySelectorAll('video, audio'));
+                    const target = media.find(m => !m.paused) || media.find(m => m.readyState >= 1) || media[0];
+                    if (!target) return -1;
+                    if (target.paused) { target.play().catch(() => {}); return 1; }
+                    target.pause();
+                    return 0;
+                })();
+                """);
+            return res == "1";
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task SeekMediaAsync(TabItemModel tab, double deltaSeconds)
+    {
+        if (!_views.TryGetValue(tab.Id, out var view) || view.CoreWebView2 is null)
+            return;
+
+        try
+        {
+            var d = deltaSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            await view.CoreWebView2.ExecuteScriptAsync($$"""
+                (() => {
+                    const media = Array.from(document.querySelectorAll('video, audio'));
+                    const target = media.find(m => !m.paused) || media.find(m => m.readyState >= 1) || media[0];
+                    if (target && Number.isFinite(target.currentTime)) {
+                        target.currentTime = Math.max(0, target.currentTime + ({{d}}));
+                    }
+                })();
+                """);
+        }
+        catch { }
+    }
+
     public async Task<bool> SetVideoPlaybackRateAsync(TabItemModel tab, double rate)
     {
         if (!_views.TryGetValue(tab.Id, out var view) || view.CoreWebView2 is null)
@@ -996,10 +1042,18 @@ public sealed class TabHostController : IDisposable
 
         // Audio / Mute indicators
         core.IsDocumentPlayingAudioChanged += (_, _) =>
-            _primaryHostGrid.Dispatcher.BeginInvoke(() => tab.IsPlayingAudio = core.IsDocumentPlayingAudio);
+            _primaryHostGrid.Dispatcher.BeginInvoke(() =>
+            {
+                tab.IsPlayingAudio = core.IsDocumentPlayingAudio;
+                StatsChanged?.Invoke();
+            });
 
         core.IsMutedChanged += (_, _) =>
-            _primaryHostGrid.Dispatcher.BeginInvoke(() => tab.IsMuted = core.IsMuted);
+            _primaryHostGrid.Dispatcher.BeginInvoke(() =>
+            {
+                tab.IsMuted = core.IsMuted;
+                StatsChanged?.Invoke();
+            });
 
         core.NavigationStarting += (_, e) =>
         {

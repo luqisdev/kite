@@ -485,6 +485,81 @@
 
                     <!-- Right Toolbar Actions (Minimal & Clean) -->
                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+                        <Button x:Name="BtnMediaHub" Visibility="Collapsed" Style="{StaticResource SubtleBtn}"
+                                Padding="8,5" Margin="0,0,4,0" ToolTip="Global Medya Kontrol Merkezi" Click="BtnMediaHub_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE8D6;" FontSize="11.5"
+                                           Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                <TextBlock x:Name="TxtMediaHubBadge" Text="Medya" FontSize="11" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextPrimary}" />
+                            </StackPanel>
+                        </Button>
+                        <Popup x:Name="MediaHubPopup"
+                               PlacementTarget="{Binding ElementName=BtnMediaHub}"
+                               Placement="Bottom" VerticalOffset="8" HorizontalOffset="-220"
+                               AllowsTransparency="True" StaysOpen="False">
+                            <Border Width="356" Padding="14" CornerRadius="12" Margin="6"
+                                    Background="{DynamicResource BgSurface}"
+                                    BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="18" ShadowDepth="4" Opacity="0.45" Color="#000000" />
+                                </Border.Effect>
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,10">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE8D6;" Foreground="{DynamicResource AccentBrush}" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                            <TextBlock Text="Medya Kontrol Merkezi" Foreground="{DynamicResource TextPrimary}" FontSize="13.5" FontWeight="SemiBold" />
+                                        </StackPanel>
+                                        <Button HorizontalAlignment="Right" Style="{StaticResource SubtleBtn}" Content="Tümünü Sustur" Padding="8,3" FontSize="11"
+                                                Click="BtnMediaMuteAll_Click" />
+                                    </Grid>
+                                    <ScrollViewer MaxHeight="320" VerticalScrollBarVisibility="Auto">
+                                        <ItemsControl x:Name="MediaHubList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Padding="10" Margin="0,0,0,8" CornerRadius="10"
+                                                            Background="{DynamicResource BgInput}"
+                                                            BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1">
+                                                        <StackPanel>
+                                                            <Grid Margin="0,0,0,8" Cursor="Hand" MouseLeftButtonUp="BtnMediaJumpTab_Click" Tag="{Binding}">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <Grid Grid.Column="0" Width="26" Height="26" Margin="0,0,9,0">
+                                                                    <Border CornerRadius="6" Background="{DynamicResource AccentSoft}">
+                                                                        <TextBlock Text="{Binding BadgeLetter}" Foreground="{DynamicResource AccentBrush}" FontSize="11" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                                    </Border>
+                                                                    <Image Source="{Binding Favicon}" Width="18" Height="18" Visibility="{Binding HasFavicon, Converter={StaticResource BoolToVis}}" />
+                                                                </Grid>
+                                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                                    <TextBlock Text="{Binding Title}" Foreground="{DynamicResource TextPrimary}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                                    <TextBlock Text="{Binding HostDisplay}" Foreground="{DynamicResource TextMuted}" FontSize="10.5" TextTrimming="CharacterEllipsis" />
+                                                                </StackPanel>
+                                                                <TextBlock Grid.Column="2" FontFamily="{StaticResource IconFont}" Text="&#xE8A7;" Foreground="{DynamicResource TextMuted}" FontSize="11" VerticalAlignment="Center" ToolTip="Sekmeye Git" />
+                                                            </Grid>
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <Button Style="{StaticResource SubtleBtn}" Padding="7,4" Margin="0,0,4,0" FontSize="10.5" Content="-10s" ToolTip="10 saniye geri" Click="BtnMediaBack10_Click" Tag="{Binding}" />
+                                                                <Button Style="{StaticResource AccentBtn}" Padding="10,4" Margin="0,0,4,0" FontSize="11" ToolTip="Oynat / Duraklat" Click="BtnMediaPlayPause_Click" Tag="{Binding}">
+                                                                    <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE768;" FontSize="11" />
+                                                                </Button>
+                                                                <Button Style="{StaticResource SubtleBtn}" Padding="7,4" Margin="0,0,4,0" FontSize="10.5" Content="+10s" ToolTip="10 saniye ileri" Click="BtnMediaFwd10_Click" Tag="{Binding}" />
+                                                                <Button Style="{StaticResource SubtleBtn}" Padding="8,4" Margin="0,0,4,0" ToolTip="Sesi Aç / Kapat" Click="BtnMediaMute_Click" Tag="{Binding}">
+                                                                    <TextBlock FontFamily="{StaticResource IconFont}" Text="{Binding AudioIcon}" FontSize="11" />
+                                                                </Button>
+                                                                <Button Style="{StaticResource SubtleBtn}" Padding="7,4" Margin="0,0,4,0" FontSize="10.5" Content="PiP" ToolTip="Resim İçinde Resim" Click="BtnMediaPip_Click" Tag="{Binding}" />
+                                                                <Button Style="{StaticResource SubtleBtn}" Padding="7,4" FontSize="10.5" Content="1.5x" ToolTip="Hız: 1.5x / 1x" Click="BtnMediaSpeed_Click" Tag="{Binding}" />
+                                                            </StackPanel>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
                         <Button x:Name="BtnFocusBadge" Visibility="Collapsed" Style="{StaticResource SubtleBtn}"
                                 Padding="8,5" Margin="0,0,4,0" ToolTip="Odak Modu (Pomodoro)" Click="BtnPanelFocus_Click">
                             <StackPanel Orientation="Horizontal">

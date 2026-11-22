@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<DevToolsConsoleEntry> _devConsole = new();
     private readonly ObservableCollection<DevToolsNetworkEntry> _devNetwork = new();
     private readonly ObservableCollection<SpeedDialItem> _speedDial = new();
+    private readonly ObservableCollection<TabItemModel> _mediaTabs = new();
     private readonly Stack<(string Url, string Title, string? GroupName, string? GroupColorHex)> _closedTabs = new();
     private int _groupCounter = 1;
 
@@ -96,6 +97,7 @@ public partial class MainWindow : Window
         DevConsoleList.ItemsSource = _devConsole;
         DevNetworkList.ItemsSource = _devNetwork;
         SpeedDialList.ItemsSource = _speedDial;
+        MediaHubList.ItemsSource = _mediaTabs;
 
         _host.NetworkLogged += entry =>
         {
@@ -510,6 +512,7 @@ public partial class MainWindow : Window
         await _host.NavigateAsync(_activeTab, resolved);
         UpdateInternalOverlays(_activeTab);
         SyncToolbarToActiveTab();
+        RefreshMediaHubUi();
     }
 
     private async void CloseTab(TabItemModel tab)
@@ -693,6 +696,7 @@ public partial class MainWindow : Window
         if (_activeTab?.IsPerformancePage == true)
             RefreshPerformanceDashboard();
         SyncToolbarToActiveTab();
+        RefreshMediaHubUi();
     }
 
     private void ShowToast(string message, string? actionLabel = null, Action? action = null)
@@ -874,6 +878,7 @@ public partial class MainWindow : Window
             _ = LoadBookmarkIconAsync(b);
         }
         SyncToolbarToActiveTab();
+        RefreshMediaHubUi();
     }
 
     private async Task LoadBookmarkIconAsync(BookmarkItem item)
@@ -3101,5 +3106,96 @@ public partial class MainWindow : Window
 
         TabPreviewPopup.PlacementTarget = target;
         TabPreviewPopup.IsOpen = true;
+    }
+
+    // ===================== GLOBAL MEDIA CONTROL HUB =====================
+
+    private void RefreshMediaHubUi()
+    {
+        var activeMedia = _allTabs.Where(t => t.ShowAudioButton).ToList();
+        _mediaTabs.Clear();
+        foreach (var t in activeMedia)
+            _mediaTabs.Add(t);
+
+        if (activeMedia.Count > 0)
+        {
+            TxtMediaHubBadge.Text = activeMedia.Count == 1 ? "Medya" : $"Medya ({activeMedia.Count})";
+            BtnMediaHub.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            BtnMediaHub.Visibility = Visibility.Collapsed;
+            MediaHubPopup.IsOpen = false;
+        }
+    }
+
+    private void BtnMediaHub_Click(object sender, RoutedEventArgs e)
+    {
+        RefreshMediaHubUi();
+        MediaHubPopup.IsOpen = !MediaHubPopup.IsOpen;
+    }
+
+    private async void BtnMediaPlayPause_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: TabItemModel tab })
+            await _host.ToggleMediaPlayPauseAsync(tab);
+    }
+
+    private async void BtnMediaBack10_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: TabItemModel tab })
+            await _host.SeekMediaAsync(tab, -10);
+    }
+
+    private async void BtnMediaFwd10_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: TabItemModel tab })
+            await _host.SeekMediaAsync(tab, 10);
+    }
+
+    private void BtnMediaMute_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: TabItemModel tab })
+        {
+            _host.ToggleMute(tab);
+            RefreshMediaHubUi();
+        }
+    }
+
+    private async void BtnMediaPip_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: TabItemModel tab })
+        {
+            await _host.TogglePictureInPictureAsync(tab);
+            MediaHubPopup.IsOpen = false;
+        }
+    }
+
+    private async void BtnMediaSpeed_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: TabItemModel tab } btn)
+        {
+            var isFast = string.Equals(btn.Content?.ToString(), "1.5x", StringComparison.Ordinal);
+            await _host.SetVideoPlaybackRateAsync(tab, isFast ? 1.5 : 1.0);
+            btn.Content = isFast ? "1.0x" : "1.5x";
+            ShowToast(isFast ? "Oynatma hızı: 1.5x" : "Oynatma hızı: 1.0x");
+        }
+    }
+
+    private void BtnMediaJumpTab_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: TabItemModel tab })
+        {
+            MediaHubPopup.IsOpen = false;
+            _ = ActivateTabAsync(tab);
+        }
+    }
+
+    private void BtnMediaMuteAll_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (var tab in _allTabs.Where(t => t.IsPlayingAudio && !t.IsMuted))
+            _host.ToggleMute(tab);
+        RefreshMediaHubUi();
+        ShowToast("Tüm medya sekmeleri sessize alındı.");
     }
 }
