@@ -20,7 +20,7 @@
 - **Per-Site Permissions:** Click the address bar lock icon to manage Camera, Microphone, Location, Notifications, and clear site cookies/data.
 
 ### Productivity & Modern UI
-- **Switchable Tab Layouts:** Toggle instantly between collapsible **Vertical Tabs** and minimalist **Horizontal Tabs**, with drag-and-drop reordering, pinned tabs, audio/mute indicators, and optional colored tab groups.
+- **Modern Horizontal Tabs:** Minimalist horizontal tab bar with drag-and-drop reordering, pinned tabs, audio/mute indicators, and optional colored tab groups.
 - **Split View:** Use two tabs side-by-side in one window with a draggable divider.
 - **Command Palette (`Ctrl+K`) & Omnibox Calculator:** Fuzzy search open tabs, bookmarks, history, `kite://` pages, commands, and evaluate math expressions inline.
 - **Multi-Profile Support:** Run fully isolated profiles (Personal, Work, Custom) in parallel windows (`--profile=<id>`).

@@ -76,7 +76,6 @@ public partial class MainWindow : Window
         _faviconCache = new FaviconCacheService();
         _host = new TabHostController(WebViewHostGrid, SecondaryWebViewHostGrid, _adBlock, _focusMode, _permissions, _storage, _profileManager.GetWebViewDataPath(_activeProfile.Id));
 
-        VerticalTabsList.ItemsSource = _visibleTabs;
         HorizontalTabsList.ItemsSource = _visibleTabs;
         PerfTabsList.ItemsSource = _visibleTabs;
         FullBookmarksList.ItemsSource = _bookmarks;
@@ -654,7 +653,6 @@ public partial class MainWindow : Window
         var totalBlocked = _adBlock.TotalBlocked;
         var adStatus = _adBlock.Enabled ? "Aktif" : "Kapalı";
 
-        TxtSidebarStats.Text = $"{totalBlocked} reklam • {sleepingCount} uyuyan";
         TxtNewTabStats.Text = $"Engellenen Reklam: {totalBlocked}  •  Uyuyan Sekme: {sleepingCount}  •  Reklam Kalkanı: {adStatus}";
         TxtSettingsPerfInfo.Text = $"Saf Native .NET 8 + WebView2 • {_adBlock.RuleCount} kural • {_allTabs.Count} sekme ({sleepingCount} uyuyan)";
         if (_activeTab?.IsPerformancePage == true)
@@ -702,37 +700,7 @@ public partial class MainWindow : Window
         if (_isFullscreen) return;
 
         BookmarksBarRow.Height = _settings.ShowBookmarksBar ? new GridLength(32) : new GridLength(0);
-
-        var isVertical = string.Equals(_settings.LayoutMode, "Vertical", StringComparison.OrdinalIgnoreCase);
-
-        if (isVertical)
-        {
-            HorizontalTabBarContainer.Visibility = Visibility.Collapsed;
-            VerticalSidebar.Visibility = Visibility.Visible;
-            BtnToggleSidebar.Visibility = Visibility.Visible;
-
-            if (_settings.SidebarCollapsed)
-            {
-                VerticalSidebarColumn.Width = new GridLength(60);
-                TxtNewTabBtnLabel.Visibility = Visibility.Collapsed;
-                BtnSidebarInPrivate.Visibility = Visibility.Collapsed;
-                SidebarFooter.Visibility = Visibility.Collapsed;
-            }
-            else
-            {
-                VerticalSidebarColumn.Width = new GridLength(244);
-                TxtNewTabBtnLabel.Visibility = Visibility.Visible;
-                BtnSidebarInPrivate.Visibility = Visibility.Visible;
-                SidebarFooter.Visibility = Visibility.Visible;
-            }
-        }
-        else
-        {
-            VerticalSidebar.Visibility = Visibility.Collapsed;
-            VerticalSidebarColumn.Width = new GridLength(0);
-            BtnToggleSidebar.Visibility = Visibility.Collapsed;
-            HorizontalTabBarContainer.Visibility = Visibility.Visible;
-        }
+        HorizontalTabBarContainer.Visibility = Visibility.Visible;
     }
 
     private void ToggleFullscreen()
@@ -744,7 +712,6 @@ public partial class MainWindow : Window
             TopBarRow.Height = new GridLength(0);
             AddressBarRow.Height = new GridLength(0);
             BookmarksBarRow.Height = new GridLength(0);
-            VerticalSidebarColumn.Width = new GridLength(0);
             SidePanelColumn.Width = new GridLength(0);
             WindowState = WindowState.Maximized;
             ShowToast("Tam ekran modu (Çıkmak için F11)");
@@ -765,7 +732,6 @@ public partial class MainWindow : Window
         _isLoadingSettingsUi = true;
         try
         {
-            SelectComboByTag(CmbLayoutMode, _settings.LayoutMode);
             SelectComboByTag(CmbTheme, _settings.Theme);
             SelectComboByTag(CmbNewTabBg, _settings.NewTabBackground);
             SelectComboByTag(CmbSleepTimeout, _settings.SleepTimeoutMinutes.ToString());
@@ -997,7 +963,6 @@ public partial class MainWindow : Window
             new() { Kind = "Komut", Title = "Bölünmüş Ekran Aç / Kapat (Split View)", Subtitle = "İki sekmeyi yan yana kullan", Execute = () => { if (_host.SplitTab is not null) CloseSplitView(); else _ = OpenSplitViewAsync(); } },
             new() { Kind = "Komut", Title = "Ekran Görüntüsü Al (PNG)", Subtitle = "Ctrl+Shift+S", Execute = () => _ = TakeScreenshotAsync() },
             new() { Kind = "Komut", Title = "Kapanan Sekmeyi Geri Aç", Subtitle = "Ctrl+Shift+T", Execute = () => _ = ReopenLastClosedTabAsync() },
-            new() { Kind = "Komut", Title = "Dikey ↔ Yatay Sekme Düzenini Değiştir", Subtitle = $"Şu an: {(_settings.LayoutMode == "Vertical" ? "Dikey" : "Yatay")}", Execute = ToggleLayoutMode },
             new() { Kind = "Komut", Title = "Tüm Arka Plan Sekmelerini Uyut (0 MB RAM)", Subtitle = "Aktif olmayan sekmelerin belleğini boşaltır", Execute = SleepAllInactiveTabs },
             new() { Kind = "Komut", Title = "Tema Değiştir (Koyu ↔ Açık)", Subtitle = $"Şu an: {_settings.Theme}", Execute = ToggleTheme },
             new() { Kind = "Komut", Title = "Tam Ekran Modu", Subtitle = "F11", Execute = ToggleFullscreen },
@@ -1079,14 +1044,6 @@ public partial class MainWindow : Window
                 Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{file}\"") { UseShellExecute = true });
             });
         }
-    }
-
-    private async void ToggleLayoutMode()
-    {
-        _settings.LayoutMode = _settings.LayoutMode == "Vertical" ? "Horizontal" : "Vertical";
-        ApplyLayoutMode();
-        SyncSettingsControls();
-        await _storage.SaveSettingsAsync(_settings);
     }
 
     private async void ToggleTheme()
@@ -1327,13 +1284,6 @@ public partial class MainWindow : Window
     private void BtnMinimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
     private void BtnMaximize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
     private void BtnCloseWindow_Click(object sender, RoutedEventArgs e) => Close();
-
-    private async void BtnToggleSidebar_Click(object sender, RoutedEventArgs e)
-    {
-        _settings.SidebarCollapsed = !_settings.SidebarCollapsed;
-        ApplyLayoutMode();
-        await _storage.SaveSettingsAsync(_settings);
-    }
 
     private void BtnNewTab_Click(object sender, RoutedEventArgs e) => _ = OpenNewTabAsync(TabItemModel.NewTabUrl, isInPrivate: false);
     private void BtnNewInPrivateTab_Click(object sender, RoutedEventArgs e) => _ = OpenNewTabAsync(TabItemModel.NewTabUrl, isInPrivate: true);
@@ -1788,7 +1738,6 @@ public partial class MainWindow : Window
     }
 
     private void BtnOpenCommandPalette_Click(object sender, RoutedEventArgs e) => OpenCommandPalette();
-    private void BtnSwitchLayout_Click(object sender, RoutedEventArgs e) => ToggleLayoutMode();
 
     private void BtnToggleSplitView_Click(object sender, RoutedEventArgs e)
     {
@@ -2860,9 +2809,6 @@ public partial class MainWindow : Window
     private async void SettingControl_Changed(object sender, RoutedEventArgs e)
     {
         if (_isLoadingSettingsUi) return;
-
-        if (CmbLayoutMode.SelectedItem is ComboBoxItem layoutItem && layoutItem.Tag is string layout)
-            _settings.LayoutMode = layout;
 
         if (CmbTheme.SelectedItem is ComboBoxItem themeItem && themeItem.Tag is string theme)
             _settings.Theme = theme;

@@ -592,7 +592,6 @@ public sealed class SpeedDialItem : INotifyPropertyChanged
 
 public sealed class BrowserSettings
 {
-    public string LayoutMode { get; set; } = "Vertical"; // "Vertical" | "Horizontal"
     public string Theme { get; set; } = "Dark"; // "Dark" | "Light"
     public string AccentColor { get; set; } = "#4F8CFF";
     public bool EnableMicaBackdrop { get; set; } = true;
@@ -602,7 +601,6 @@ public sealed class BrowserSettings
     public bool ForceDarkModeGlobal { get; set; }
     public bool RestoreSessionOnStartup { get; set; } = true;
     public string SearchEngine { get; set; } = "https://www.google.com/search?q=";
-    public bool SidebarCollapsed { get; set; }
     public bool ShowBookmarksBar { get; set; }
     public string NewTabBackground { get; set; } = "Default"; // "Default" | "Aurora" | "Midnight" | "Sunset" | "Forest" | "Custom"
     public string? NewTabWallpaperPath { get; set; }
