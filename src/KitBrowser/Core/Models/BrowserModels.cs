@@ -38,8 +38,10 @@ public sealed class TabItemModel : INotifyPropertyChanged
     private bool _forceDarkMode;
     private bool _isReaderMode;
     private bool _isMobileMode;
+    private bool _isTranslated;
     private double _zoomFactor = 1.0;
     private ImageSource? _favicon;
+    private ImageSource? _previewThumbnail;
     private TabSleepState _sleepState = TabSleepState.Active;
     private int _blockedCount;
     private DateTime _lastActiveUtc = DateTime.UtcNow;
@@ -203,6 +205,35 @@ public sealed class TabItemModel : INotifyPropertyChanged
     }
 
     public bool HasFavicon => _favicon is not null;
+
+    [JsonIgnore]
+    public ImageSource? PreviewThumbnail
+    {
+        get => _previewThumbnail;
+        set
+        {
+            if (SetField(ref _previewThumbnail, value))
+                OnPropertyChanged(nameof(HasPreviewThumbnail));
+        }
+    }
+
+    [JsonIgnore]
+    public bool HasPreviewThumbnail => _previewThumbnail is not null;
+
+    public bool IsTranslated
+    {
+        get => _isTranslated;
+        set => SetField(ref _isTranslated, value);
+    }
+
+    public string SleepStatusText => _isInPrivate
+        ? "Gizli Sekme"
+        : _sleepState switch
+        {
+            TabSleepState.Discarded => "Uyuyor • 0 MB RAM",
+            TabSleepState.Suspended => "Hafif Uyku",
+            _ => "Aktif Sekme"
+        };
 
     public bool IsLoading
     {

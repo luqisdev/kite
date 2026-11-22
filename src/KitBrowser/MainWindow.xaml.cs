@@ -57,6 +57,10 @@ public partial class MainWindow : Window
     private Action? _toastAction;
     private Point _dragStartPoint;
     private readonly AppUpdateService _updater = new();
+    private readonly CancellationTokenSource _pipeCts = new();
+    private readonly DispatcherTimer _tabPreviewTimer;
+    private TabItemModel? _hoveredPreviewTab;
+    private FrameworkElement? _hoveredPreviewTarget;
 
     public MainWindow()
     {
@@ -142,6 +146,13 @@ public partial class MainWindow : Window
             _toastAction = null;
         };
 
+        _tabPreviewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(260) };
+        _tabPreviewTimer.Tick += (_, _) =>
+        {
+            _tabPreviewTimer.Stop();
+            _ = ShowTabPreviewAsync();
+        };
+
         Loaded += MainWindow_Loaded;
     }
 
@@ -215,6 +226,28 @@ public partial class MainWindow : Window
         if (!restoredAny)
             await OpenNewTabAsync(TabItemModel.NewTabUrl, isInPrivate: false);
 
+        // Open external URL passed via Windows Default Browser / CLI args
+        var launchUrl = DefaultBrowserService.ExtractLaunchUrlFromArgs(Environment.GetCommandLineArgs());
+        if (!string.IsNullOrWhiteSpace(launchUrl))
+            await OpenNewTabAsync(launchUrl, isInPrivate: false);
+
+        // Listen for links clicked in other apps (Discord, WhatsApp, etc.) for default profile
+        if (_activeProfile.Id == "default")
+        {
+            DefaultBrowserService.StartPipeListener(url =>
+            {
+                Dispatcher.BeginInvoke(async () =>
+                {
+                    if (WindowState == WindowState.Minimized)
+                        WindowState = WindowState.Normal;
+                    Activate();
+                    Topmost = true;
+                    Topmost = false;
+                    await OpenNewTabAsync(url, isInPrivate: false);
+                });
+            }, _pipeCts.Token);
+        }
+
         AnimateEntrance(RootFrame, fromY: 0, durationMs: 180);
         RefreshStatsUi();
 
@@ -286,7 +319,7 @@ public partial class MainWindow : Window
         {
             _activeTab.IsSelected = false;
             var previous = _activeTab;
-            _ = _host.SoftSuspendTabAsync(previous);
+            _ = CaptureAndSoftSuspendAsync(previous);
         }
 
         _activeTab = tab;
@@ -611,6 +644,8 @@ public partial class MainWindow : Window
         BtnForward.IsEnabled = _activeTab.CanGoForward;
         BtnReload.Content = _activeTab.IsLoading ? "\uE711" : "\uE72C";
         LoadingProgressBar.Visibility = _activeTab.IsLoading ? Visibility.Visible : Visibility.Collapsed;
+        BtnTranslatePage.Visibility = _activeTab.IsInternalPage ? Visibility.Collapsed : Visibility.Visible;
+        BtnTranslatePage.Foreground = (Brush)FindResource(_activeTab.IsTranslated ? "AccentBrush" : "TextSecondary");
 
         if (!TxtAddressBar.IsKeyboardFocused)
             TxtAddressBar.Text = _activeTab.IsNewTab ? string.Empty : _activeTab.Url;
@@ -745,6 +780,7 @@ public partial class MainWindow : Window
             ChkRequirePinOnStartup.IsChecked = _settings.RequirePinOnStartup;
             ChkAutoCheckUpdates.IsChecked = _settings.AutoCheckUpdates;
             TxtUpdateStatus.Text = $"Mevcut sürüm: v{_updater.CurrentVersion}";
+            RefreshDefaultBrowserStatusUi();
             TxtPinStatus.Text = string.IsNullOrWhiteSpace(_settings.AppLockPinHash)
                 ? "PIN ayarlanmadı • 4-8 haneli PIN belirleyebilirsin"
                 : "PIN kilidi aktif • Ctrl+Shift+L ile anında kilitleyebilirsin";
@@ -1256,6 +1292,8 @@ public partial class MainWindow : Window
         _clockTimer.Stop();
         _sleepTimer.Stop();
         _toastTimer.Stop();
+        _tabPreviewTimer.Stop();
+        _pipeCts.Cancel();
 
         // Persist non-InPrivate real website tabs synchronously before disposing storage
         if (_settings.RestoreSessionOnStartup)
@@ -2447,6 +2485,7 @@ public partial class MainWindow : Window
             var sel = req.SelectionText.Trim();
             var preview = sel.Length > 26 ? sel[..26] + "..." : sel;
             menu.Items.Add(MakeItem("Kopyala", "\uE8C8", () => Clipboard.SetText(sel), "Ctrl+C"));
+            menu.Items.Add(MakeItem("Türkçeye Çevir", "\uE8C1", () => _ = TranslateSelectedTextAsync(sel)));
             menu.Items.Add(MakeItem($"Ara: \"{preview}\"", "\uE721", () =>
             {
                 var url = OmniboxParser.ResolveInput(sel, _settings.SearchEngine);
@@ -2489,6 +2528,7 @@ public partial class MainWindow : Window
         menu.Items.Add(new Separator());
 
         // Page Tools
+        menu.Items.Add(MakeItem(req.Tab.IsTranslated ? "Orijinal Dile Dön" : "Sayfayı Türkçeye Çevir", "\uE8C1", () => _ = TranslateActivePageAsync()));
         menu.Items.Add(MakeItem("Okuyucu Modu", "\uE736", () => _ = ToggleReaderModeForActiveTabAsync()));
         menu.Items.Add(MakeItem("Ekran Görüntüsü Al", "\uE722", () => _ = TakeScreenshotAsync(), "Ctrl+Shift+S"));
         menu.Items.Add(MakeItem("PDF Olarak Kaydet", "\uE749", () => _ = SaveActiveTabAsPdfAsync(), "Ctrl+P"));
@@ -2917,4 +2957,149 @@ public partial class MainWindow : Window
 
     private void BtnDismissUpdateBanner_Click(object sender, RoutedEventArgs e)
         => UpdateBanner.Visibility = Visibility.Collapsed;
+
+    // ===================== DEFAULT BROWSER REGISTRATION =====================
+
+    private void RefreshDefaultBrowserStatusUi()
+    {
+        var isDefault = DefaultBrowserService.IsDefaultBrowser();
+        TxtDefaultBrowserStatus.Text = isDefault
+            ? "KitBrowser şu an varsayılan Windows tarayıcın ✓"
+            : "Dış bağlantıları (Discord, WhatsApp vb.) doğrudan KitBrowser'da aç";
+        BtnSetDefaultBrowser.Content = isDefault ? "Varsayılan Tarayıcı ✓" : "Varsayılan Tarayıcı Yap";
+    }
+
+    private void BtnSetDefaultBrowser_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            DefaultBrowserService.RegisterAsDefaultBrowser();
+            DefaultBrowserService.OpenWindowsDefaultAppsSettings();
+            ShowToast("KitBrowser kaydedildi — açılan Windows Ayarları'ndan KitBrowser'ı seç.");
+            RefreshDefaultBrowserStatusUi();
+        }
+        catch (Exception ex)
+        {
+            ShowToast($"Kayıt başarısız: {ex.Message}");
+        }
+    }
+
+    // ===================== PAGE & SELECTION TRANSLATION =====================
+
+    private void BtnTranslatePage_Click(object sender, RoutedEventArgs e)
+        => _ = TranslateActivePageAsync();
+
+    private async Task TranslateActivePageAsync()
+    {
+        if (_activeTab is null || _activeTab.IsInternalPage) return;
+
+        BtnTranslatePage.IsEnabled = false;
+        try
+        {
+            var wasTranslated = _activeTab.IsTranslated;
+            if (!wasTranslated)
+                ShowToast("Sayfa Türkçeye çevriliyor...");
+
+            var (isTranslated, count) = await _host.ToggleTranslatePageAsync(_activeTab, "tr");
+            SyncToolbarToActiveTab();
+            ShowToast(isTranslated
+                ? $"Sayfa Türkçeye çevrildi ({count} metin bloğu)."
+                : wasTranslated ? "Sayfa orijinal diline döndürüldü." : "Çevrilecek metin bulunamadı.");
+        }
+        finally
+        {
+            BtnTranslatePage.IsEnabled = true;
+        }
+    }
+
+    private async Task TranslateSelectedTextAsync(string selectedText)
+    {
+        TxtTranslateOriginal.Text = selectedText;
+        TxtTranslateResult.Text = "Çevriliyor...";
+        TranslatePopup.IsOpen = true;
+
+        var translated = await TranslationService.TranslateTextAsync(selectedText, "tr");
+        TxtTranslateResult.Text = string.IsNullOrWhiteSpace(translated)
+            ? "Çeviri alınamadı. İnternet bağlantını kontrol et."
+            : translated;
+    }
+
+    private void BtnCopyTranslation_Click(object sender, RoutedEventArgs e)
+    {
+        if (!string.IsNullOrWhiteSpace(TxtTranslateResult.Text))
+        {
+            Clipboard.SetText(TxtTranslateResult.Text);
+            ShowToast("Çeviri panoya kopyalandı.");
+        }
+        TranslatePopup.IsOpen = false;
+    }
+
+    private void BtnCloseTranslatePopup_Click(object sender, RoutedEventArgs e)
+        => TranslatePopup.IsOpen = false;
+
+    // ===================== TAB HOVER PREVIEW CARD =====================
+
+    private async Task CaptureAndSoftSuspendAsync(TabItemModel tab)
+    {
+        await _host.CaptureThumbnailAsync(tab);
+        await _host.SoftSuspendTabAsync(tab);
+    }
+
+    private void TabItem_MouseEnter(object sender, MouseEventArgs e)
+    {
+        if (sender is not FrameworkElement el || el.Tag is not TabItemModel tab)
+            return;
+
+        _hoveredPreviewTab = tab;
+        _hoveredPreviewTarget = el;
+
+        if (TabPreviewPopup.IsOpen)
+        {
+            _tabPreviewTimer.Stop();
+            _ = ShowTabPreviewAsync();
+        }
+        else
+        {
+            _tabPreviewTimer.Stop();
+            _tabPreviewTimer.Start();
+        }
+    }
+
+    private void TabItem_MouseLeave(object sender, MouseEventArgs e)
+    {
+        _tabPreviewTimer.Stop();
+        _hoveredPreviewTab = null;
+        _hoveredPreviewTarget = null;
+        TabPreviewPopup.IsOpen = false;
+    }
+
+    private async Task ShowTabPreviewAsync()
+    {
+        var tab = _hoveredPreviewTab;
+        var target = _hoveredPreviewTarget;
+        if (tab is null || target is null) return;
+
+        if (tab == _activeTab && !tab.IsInternalPage && tab.PreviewThumbnail is null)
+            await _host.CaptureThumbnailAsync(tab);
+
+        if (_hoveredPreviewTab != tab) return;
+
+        TxtTabPreviewTitle.Text = string.IsNullOrWhiteSpace(tab.Title) ? "Yeni Sekme" : tab.Title;
+        TxtTabPreviewUrl.Text = tab.IsInternalPage ? tab.Url : tab.HostDisplay;
+        TxtTabPreviewStatus.Text = tab.SleepStatusText;
+
+        if (tab.PreviewThumbnail is not null && !tab.IsInternalPage)
+        {
+            ImgTabPreview.Source = tab.PreviewThumbnail;
+            TabPreviewImgBorder.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            ImgTabPreview.Source = null;
+            TabPreviewImgBorder.Visibility = Visibility.Collapsed;
+        }
+
+        TabPreviewPopup.PlacementTarget = target;
+        TabPreviewPopup.IsOpen = true;
+    }
 }

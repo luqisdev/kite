@@ -12,6 +12,15 @@ namespace KitBrowser
         public static void Main(string[] args)
         {
             VelopackApp.Build().Run();
+
+            bool hasProfileArg = args.Any(a => a.StartsWith("--profile=", StringComparison.OrdinalIgnoreCase));
+            var launchUrl = Core.Services.DefaultBrowserService.ExtractLaunchUrlFromArgs(args);
+            if (!hasProfileArg && !string.IsNullOrWhiteSpace(launchUrl) &&
+                Core.Services.DefaultBrowserService.TrySendUrlToRunningInstance(launchUrl))
+            {
+                return;
+            }
+
             var app = new App();
             app.InitializeComponent();
             app.Run();

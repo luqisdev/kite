@@ -20,7 +20,9 @@
 - **Per-Site Permissions:** Click the address bar lock icon to manage Camera, Microphone, Location, Notifications, and clear site cookies/data.
 
 ### Productivity & Modern UI
-- **Modern Horizontal Tabs:** Minimalist horizontal tab bar with drag-and-drop reordering, pinned tabs, audio/mute indicators, and optional colored tab groups.
+- **Modern Horizontal Tabs & Hover Previews:** Minimalist horizontal tab bar with live thumbnail hover preview cards, drag-and-drop reordering, pinned tabs, audio/mute indicators, and optional colored tab groups.
+- **Built-in Page & Selection Translator:** One-click in-place Turkish page translation from the address bar and instant right-click selection translation popup.
+- **Windows Default Browser & Delta Auto-Updates:** Register as Windows default browser (`http`/`https`/`.html`) with single-instance link handoff, plus Velopack Delta auto-updates.
 - **Split View:** Use two tabs side-by-side in one window with a draggable divider.
 - **Command Palette (`Ctrl+K`) & Omnibox Calculator:** Fuzzy search open tabs, bookmarks, history, `kite://` pages, commands, and evaluate math expressions inline.
 - **Multi-Profile Support:** Run fully isolated profiles (Personal, Work, Custom) in parallel windows (`--profile=<id>`).

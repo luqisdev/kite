@@ -358,6 +358,139 @@ public sealed class TabHostController : IDisposable
         return true;
     }
 
+    public async Task CaptureThumbnailAsync(TabItemModel tab)
+    {
+        if (tab.IsInternalPage || !_views.TryGetValue(tab.Id, out var view) || view.CoreWebView2 is null)
+            return;
+
+        try
+        {
+            using var ms = new MemoryStream();
+            await view.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Jpeg, ms);
+            ms.Position = 0;
+            var bmp = new System.Windows.Media.Imaging.BitmapImage();
+            bmp.BeginInit();
+            bmp.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            bmp.DecodePixelWidth = 260;
+            bmp.StreamSource = ms;
+            bmp.EndInit();
+            bmp.Freeze();
+            tab.PreviewThumbnail = bmp;
+        }
+        catch { }
+    }
+
+    public async Task<(bool IsTranslated, int Count)> ToggleTranslatePageAsync(TabItemModel tab, string targetLang = "tr")
+    {
+        if (tab.IsInternalPage || !_views.TryGetValue(tab.Id, out var view) || view.CoreWebView2 is null)
+            return (false, 0);
+
+        var core = view.CoreWebView2;
+
+        if (tab.IsTranslated)
+        {
+            try
+            {
+                await core.ExecuteScriptAsync("""
+                    (() => {
+                        if (!window.__kitTrNodes) return;
+                        window.__kitTrNodes.forEach(item => {
+                            try { if (item.n && item.orig != null) item.n.nodeValue = item.orig; } catch {}
+                        });
+                        window.__kitTrNodes = null;
+                    })();
+                    """);
+            }
+            catch { }
+            tab.IsTranslated = false;
+            return (false, 0);
+        }
+
+        try
+        {
+            var rawJson = await core.ExecuteScriptAsync("""
+                (() => {
+                    const skip = new Set(['SCRIPT','STYLE','NOSCRIPT','CODE','PRE','TEXTAREA','INPUT','SVG','MATH']);
+                    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                    const nodes = [];
+                    const texts = [];
+                    let n;
+                    while ((n = walker.nextNode()) && nodes.length < 180) {
+                        const p = n.parentElement;
+                        if (!p || skip.has(p.tagName) || p.isContentEditable) continue;
+                        const t = n.nodeValue;
+                        if (!t || t.trim().length < 2) continue;
+                        if (t.trim().length > 600) continue;
+                        nodes.push({ n, orig: t });
+                        texts.push(t.trim());
+                    }
+                    window.__kitTrNodes = nodes;
+                    return texts;
+                })();
+                """);
+
+            var texts = JsonSerializer.Deserialize<List<string>>(rawJson);
+            if (texts is null || texts.Count == 0)
+                return (false, 0);
+
+            const string sep = "\n⟦KB⟧\n";
+            var translated = new string[texts.Count];
+            int idx = 0;
+
+            while (idx < texts.Count)
+            {
+                var batch = new List<string>();
+                var batchStart = idx;
+                int charCount = 0;
+
+                while (idx < texts.Count && charCount + texts[idx].Length < 2200 && batch.Count < 25)
+                {
+                    batch.Add(texts[idx]);
+                    charCount += texts[idx].Length + sep.Length;
+                    idx++;
+                }
+
+                var joined = string.Join(sep, batch);
+                var result = await TranslationService.TranslateTextAsync(joined, targetLang);
+                if (string.IsNullOrEmpty(result))
+                {
+                    for (int i = 0; i < batch.Count; i++)
+                        translated[batchStart + i] = batch[i];
+                    continue;
+                }
+
+                var parts = result.Split(new[] { "⟦KB⟧" }, StringSplitOptions.None);
+                for (int i = 0; i < batch.Count; i++)
+                {
+                    translated[batchStart + i] = i < parts.Length ? parts[i].Trim() : batch[i];
+                }
+            }
+
+            var payload = JsonSerializer.Serialize(translated);
+            await core.ExecuteScriptAsync($$"""
+                (() => {
+                    const arr = {{payload}};
+                    if (!window.__kitTrNodes) return;
+                    for (let i = 0; i < window.__kitTrNodes.length && i < arr.length; i++) {
+                        try {
+                            const orig = window.__kitTrNodes[i].orig;
+                            const lead = orig.match(/^\s*/)?.[0] || '';
+                            const trail = orig.match(/\s*$/)?.[0] || '';
+                            window.__kitTrNodes[i].n.nodeValue = lead + arr[i] + trail;
+                        } catch {}
+                    }
+                })();
+                """);
+
+            tab.IsTranslated = true;
+            return (true, texts.Count);
+        }
+        catch
+        {
+            return (false, 0);
+        }
+    }
+
     public async Task<bool> ToggleReaderModeAsync(TabItemModel tab)
     {
         if (!_views.TryGetValue(tab.Id, out var view) || view.CoreWebView2 is null)
@@ -917,12 +1050,26 @@ public sealed class TabHostController : IDisposable
         core.NavigationCompleted += (_, _) =>
         {
             tab.IsLoading = false;
+            tab.IsTranslated = false;
             tab.CanGoBack = core.CanGoBack;
             tab.CanGoForward = core.CanGoForward;
             if (!string.IsNullOrWhiteSpace(core.DocumentTitle))
                 tab.Title = core.DocumentTitle;
             if (!string.IsNullOrWhiteSpace(core.Source))
                 tab.Url = core.Source;
+
+            if (tab.IsSelected && !tab.IsInternalPage)
+            {
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(550);
+                    await view.Dispatcher.InvokeAsync(async () =>
+                    {
+                        if (tab.IsSelected && !tab.IsLoading)
+                            await CaptureThumbnailAsync(tab);
+                    });
+                });
+            }
 
             // Never record history for InPrivate tabs
             if (!tab.IsInPrivate)

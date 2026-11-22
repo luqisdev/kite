@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Pipes;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -10,6 +12,7 @@ using System.Text.RegularExpressions;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using KitBrowser.Core.Models;
+using Microsoft.Win32;
 using Velopack;
 using Velopack.Sources;
 
@@ -533,6 +536,203 @@ public sealed class AppUpdateService
         catch (Exception ex)
         {
             return (false, $"Güncelleme indirilemedi: {ex.Message}");
+        }
+    }
+}
+
+// ===================== DEFAULT BROWSER & SINGLE-INSTANCE PIPE =====================
+
+public static class DefaultBrowserService
+{
+    private const string ProgId = "KitBrowserHTML";
+    private const string PipeName = "KitBrowser_SingleInstance_Pipe_v1";
+
+    public static bool IsDefaultBrowser()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice");
+            var progId = key?.GetValue("ProgId")?.ToString();
+            return string.Equals(progId, ProgId, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static void RegisterAsDefaultBrowser()
+    {
+        var exePath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
+            return;
+
+        // 1. ProgId handler
+        using (var cls = Registry.CurrentUser.CreateSubKey($@"Software\Classes\{ProgId}"))
+        {
+            cls.SetValue("", "KitBrowser HTML Document");
+            cls.SetValue("URL Protocol", "");
+            using (var icon = cls.CreateSubKey("DefaultIcon"))
+                icon.SetValue("", $"\"{exePath}\",0");
+            using (var cmd = cls.CreateSubKey(@"shell\open\command"))
+                cmd.SetValue("", $"\"{exePath}\" \"%1\"");
+        }
+
+        // 2. StartMenuInternet Client & Capabilities
+        const string capPath = @"Software\Clients\StartMenuInternet\KitBrowser\Capabilities";
+        using (var client = Registry.CurrentUser.CreateSubKey(@"Software\Clients\StartMenuInternet\KitBrowser"))
+        {
+            client.SetValue("", "KitBrowser");
+            using (var icon = client.CreateSubKey("DefaultIcon"))
+                icon.SetValue("", $"\"{exePath}\",0");
+            using (var cmd = client.CreateSubKey(@"shell\open\command"))
+                cmd.SetValue("", $"\"{exePath}\"");
+        }
+
+        using (var cap = Registry.CurrentUser.CreateSubKey(capPath))
+        {
+            cap.SetValue("ApplicationName", "KitBrowser");
+            cap.SetValue("ApplicationDescription", "Hızlı, hafif ve gizlilik odaklı yerli Windows web tarayıcısı.");
+            cap.SetValue("ApplicationIcon", $"\"{exePath}\",0");
+            using (var urlAssoc = cap.CreateSubKey("URLAssociations"))
+            {
+                urlAssoc.SetValue("http", ProgId);
+                urlAssoc.SetValue("https", ProgId);
+            }
+            using (var fileAssoc = cap.CreateSubKey("FileAssociations"))
+            {
+                fileAssoc.SetValue(".htm", ProgId);
+                fileAssoc.SetValue(".html", ProgId);
+            }
+        }
+
+        // 3. RegisteredApplications
+        using (var regApps = Registry.CurrentUser.CreateSubKey(@"Software\RegisteredApplications"))
+        {
+            regApps.SetValue("KitBrowser", capPath);
+        }
+    }
+
+    public static void OpenWindowsDefaultAppsSettings()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("ms-settings:defaultapps") { UseShellExecute = true });
+        }
+        catch { }
+    }
+
+    public static string? ExtractLaunchUrlFromArgs(string[] args)
+    {
+        foreach (var raw in args)
+        {
+            if (string.IsNullOrWhiteSpace(raw) || raw.StartsWith('-'))
+                continue;
+            if (raw.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || raw.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var trimmed = raw.Trim().Trim('"');
+            if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+                return trimmed;
+
+            if (File.Exists(trimmed) &&
+                (trimmed.EndsWith(".html", StringComparison.OrdinalIgnoreCase) ||
+                 trimmed.EndsWith(".htm", StringComparison.OrdinalIgnoreCase)))
+                return new Uri(trimmed).AbsoluteUri;
+        }
+        return null;
+    }
+
+    public static bool TrySendUrlToRunningInstance(string url)
+    {
+        try
+        {
+            using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out);
+            client.Connect(350);
+            using var writer = new StreamWriter(client, Encoding.UTF8) { AutoFlush = true };
+            writer.WriteLine(url);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static void StartPipeListener(Action<string> onUrlReceived, CancellationToken ct)
+    {
+        _ = Task.Run(async () =>
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await using var server = new NamedPipeServerStream(
+                        PipeName,
+                        PipeDirection.In,
+                        NamedPipeServerStream.MaxAllowedServerInstances,
+                        PipeTransmissionMode.Byte,
+                        PipeOptions.Asynchronous);
+
+                    await server.WaitForConnectionAsync(ct).ConfigureAwait(false);
+                    using var reader = new StreamReader(server, Encoding.UTF8);
+                    var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
+                    if (!string.IsNullOrWhiteSpace(line))
+                        onUrlReceived(line.Trim());
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch
+                {
+                    await Task.Delay(400, ct).ConfigureAwait(false);
+                }
+            }
+        }, ct);
+    }
+}
+
+// ===================== PAGE & SELECTION TRANSLATION SERVICE =====================
+
+public static class TranslationService
+{
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(8) };
+
+    public static async Task<string?> TranslateTextAsync(string text, string targetLang = "tr")
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        try
+        {
+            var clipped = text.Length > 3500 ? text[..3500] : text;
+            var url = $"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={Uri.EscapeDataString(targetLang)}&dt=t&q={Uri.EscapeDataString(clipped)}";
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.UserAgent.ParseAdd("Mozilla/5.0");
+            using var resp = await Http.SendAsync(req).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+                return null;
+
+            var json = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array || doc.RootElement.GetArrayLength() == 0)
+                return null;
+
+            var sb = new StringBuilder();
+            foreach (var part in doc.RootElement[0].EnumerateArray())
+            {
+                if (part.ValueKind == JsonValueKind.Array && part.GetArrayLength() > 0 && part[0].ValueKind == JsonValueKind.String)
+                    sb.Append(part[0].GetString());
+            }
+            return sb.Length > 0 ? sb.ToString() : null;
+        }
+        catch
+        {
+            return null;
         }
     }
 }
