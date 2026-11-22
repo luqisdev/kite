@@ -474,6 +474,7 @@ public sealed class FaviconCacheService
 
 public sealed class AppUpdateService
 {
+    public const string DefaultFeedUrl = "https://github.com/luqisdev/kite";
     public UpdateInfo? PendingUpdate { get; private set; }
     private UpdateManager? _manager;
 
@@ -482,20 +483,17 @@ public sealed class AppUpdateService
             ? $"{v.Major}.{v.Minor}.{v.Build}"
             : "1.0.0";
 
-    private static UpdateManager CreateManager(string feedUrl)
+    private static UpdateManager CreateManager(string? feedUrl = null)
     {
-        var trimmed = (feedUrl ?? string.Empty).Trim();
+        var trimmed = string.IsNullOrWhiteSpace(feedUrl) ? DefaultFeedUrl : feedUrl.Trim();
         if (trimmed.StartsWith("https://github.com/", StringComparison.OrdinalIgnoreCase))
             return new UpdateManager(new GithubSource(trimmed, accessToken: null, prerelease: false));
 
         return new UpdateManager(trimmed);
     }
 
-    public async Task<(bool Available, string StatusMessage, string? TargetVersion)> CheckForUpdatesAsync(string feedUrl)
+    public async Task<(bool Available, string StatusMessage, string? TargetVersion)> CheckForUpdatesAsync(string? feedUrl = null)
     {
-        if (string.IsNullOrWhiteSpace(feedUrl))
-            return (false, "Güncelleme sunucu adresi ayarlanmadı.", null);
-
         try
         {
             _manager = CreateManager(feedUrl);

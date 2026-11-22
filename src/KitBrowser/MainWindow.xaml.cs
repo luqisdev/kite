@@ -2851,7 +2851,7 @@ public partial class MainWindow : Window
         try
         {
             await Task.Delay(2500);
-            var (available, message, targetVersion) = await _updater.CheckForUpdatesAsync(_settings.UpdateFeedUrl);
+            var (available, message, targetVersion) = await _updater.CheckForUpdatesAsync(AppUpdateService.DefaultFeedUrl);
             TxtUpdateStatus.Text = message;
             if (available)
             {
@@ -2872,7 +2872,7 @@ public partial class MainWindow : Window
         TxtUpdateStatus.Text = "Güncellemeler denetleniyor...";
         try
         {
-            var (available, message, targetVersion) = await _updater.CheckForUpdatesAsync(_settings.UpdateFeedUrl);
+            var (available, message, targetVersion) = await _updater.CheckForUpdatesAsync(AppUpdateService.DefaultFeedUrl);
             TxtUpdateStatus.Text = message;
             if (available)
             {
