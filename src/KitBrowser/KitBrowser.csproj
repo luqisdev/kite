@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>KitBrowser</AssemblyName>
+    <RootNamespace>KitBrowser</RootNamespace>
+    <ApplicationTitle>KitBrowser</ApplicationTitle>
+    <ApplicationIcon>Resources\kitbrowser.ico</ApplicationIcon>
+    <Version>1.0.0</Version>
+    <Product>KitBrowser</Product>
+    <Authors>KitBrowser Contributors</Authors>
+    <Description>Fast, lightweight, privacy-first native Windows web browser built with .NET 8 WPF and WebView2.</Description>
+    <Copyright>Copyright (c) 2026 KitBrowser Contributors</Copyright>
+    <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <PackageReference Include="Velopack" Version="1.2.161" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Include="App.xaml" />
+    <EmbeddedResource Include="Resources\blocklist.txt" />
+    <Resource Include="Resources\kitbrowser.ico" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,15 @@
+bin/
+obj/
+dist/
+publish/
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.db
+*.db-shm
+*.db-wal
+profiles.json
+FaviconCache/
+WebView2Data/

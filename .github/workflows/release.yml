@@ -1,0 +1,68 @@
+name: Release (Velopack Delta)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 1.0.1)"
+        required: true
+        default: "1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Resolve Version
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $v = "${{ github.event.inputs.version }}".TrimStart('v')
+          } else {
+            $v = "${{ github.ref_name }}".TrimStart('v')
+          }
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Install Velopack CLI
+        shell: pwsh
+        run: dotnet tool install -g vpk
+
+      - name: Download Previous Release (for Delta diff)
+        shell: pwsh
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          vpk download github --repoUrl "https://github.com/${{ github.repository }}" --token "$env:GITHUB_TOKEN" --outputDir "dist\releases"
+
+      - name: Build & Pack Velopack Release
+        shell: pwsh
+        run: .\build-release.ps1 -Version "${{ steps.ver.outputs.version }}"
+
+      - name: Upload to GitHub Releases
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          vpk upload github `
+            --repoUrl "https://github.com/${{ github.repository }}" `
+            --token "$env:GITHUB_TOKEN" `
+            --outputDir "dist\releases" `
+            --releaseName "KitBrowser v${{ steps.ver.outputs.version }}" `
+            --tag "v${{ steps.ver.outputs.version }}" `
+            --publish
