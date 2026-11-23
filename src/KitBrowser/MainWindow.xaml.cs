@@ -169,6 +169,8 @@ public partial class MainWindow : Window
         _permissions.Load(_settings.SitePermissions);
         RefreshFocusBlockedUi();
         _host.GlobalForceDark = _settings.ForceDarkModeGlobal;
+        _host.DownloadAcceleratorEnabled = _settings.DownloadAcceleratorEnabled;
+        _host.DownloadAcceleratorSegments = _settings.DownloadAcceleratorSegments;
 
         App.ApplyTheme(_settings.Theme, _settings.AccentColor);
         WindowsThemeHelper.ApplyWindowChromeEffects(this, _settings.Theme == "Dark", _settings.EnableMicaBackdrop);
@@ -412,6 +414,7 @@ public partial class MainWindow : Window
             FullHistoryList.Visibility = tab.IsHistoryPage ? Visibility.Visible : Visibility.Collapsed;
             FullBookmarksList.Visibility = tab.IsBookmarksPage ? Visibility.Visible : Visibility.Collapsed;
             FullDownloadsList.Visibility = tab.IsDownloadsPage ? Visibility.Visible : Visibility.Collapsed;
+            DownloadsAcceleratorBar.Visibility = tab.IsDownloadsPage ? Visibility.Visible : Visibility.Collapsed;
             TxtLibrarySearch.Visibility = tab.IsHistoryPage ? Visibility.Visible : Visibility.Collapsed;
             BtnLibraryClear.Visibility = (tab.IsHistoryPage || tab.IsDownloadsPage) ? Visibility.Visible : Visibility.Collapsed;
             BtnImportBookmarks.Visibility = tab.IsBookmarksPage ? Visibility.Visible : Visibility.Collapsed;
@@ -779,6 +782,15 @@ public partial class MainWindow : Window
             ChkCosmeticAdBlock.IsChecked = _settings.CosmeticAdBlockEnabled;
             ChkForceDarkGlobal.IsChecked = _settings.ForceDarkModeGlobal;
             ChkRestoreSession.IsChecked = _settings.RestoreSessionOnStartup;
+            ChkDownloadAccelerator.IsChecked = _settings.DownloadAcceleratorEnabled;
+            ChkDownloadAccelQuick.IsChecked = _settings.DownloadAcceleratorEnabled;
+            SelectComboByTag(CmbDownloadSegments, _settings.DownloadAcceleratorSegments.ToString());
+            TxtDownloadsAccelInfo.Text = _settings.DownloadAcceleratorEnabled
+                ? $"Aktif • {_settings.DownloadAcceleratorSegments}x paralel bağlantı ile yüksek hızlı indirme"
+                : "Kapalı • Standart tek akışlı indirme kullanılıyor";
+            if (string.IsNullOrWhiteSpace(_settings.SyncPhrase))
+                _settings.SyncPhrase = BraveSyncService.GenerateSyncPhrase();
+            TxtSyncPhrase.Text = _settings.SyncPhrase;
             ChkShowBookmarksBar.IsChecked = _settings.ShowBookmarksBar;
             ChkMicaBackdrop.IsChecked = _settings.EnableMicaBackdrop;
             ChkRequirePinOnStartup.IsChecked = _settings.RequirePinOnStartup;
@@ -2871,6 +2883,17 @@ public partial class MainWindow : Window
         _settings.CosmeticAdBlockEnabled = ChkCosmeticAdBlock.IsChecked == true;
         _settings.ForceDarkModeGlobal = ChkForceDarkGlobal.IsChecked == true;
         _settings.RestoreSessionOnStartup = ChkRestoreSession.IsChecked == true;
+        _settings.DownloadAcceleratorEnabled = ChkDownloadAccelerator.IsChecked == true;
+        if (CmbDownloadSegments.SelectedItem is ComboBoxItem segItem && int.TryParse(segItem.Tag?.ToString(), out var segs))
+            _settings.DownloadAcceleratorSegments = segs;
+        _host.DownloadAcceleratorEnabled = _settings.DownloadAcceleratorEnabled;
+        _host.DownloadAcceleratorSegments = _settings.DownloadAcceleratorSegments;
+        _isLoadingSettingsUi = true;
+        ChkDownloadAccelQuick.IsChecked = _settings.DownloadAcceleratorEnabled;
+        TxtDownloadsAccelInfo.Text = _settings.DownloadAcceleratorEnabled
+            ? $"Aktif • {_settings.DownloadAcceleratorSegments}x paralel bağlantı ile yüksek hızlı indirme"
+            : "Kapalı • Standart tek akışlı indirme kullanılıyor";
+        _isLoadingSettingsUi = false;
         _settings.ShowBookmarksBar = ChkShowBookmarksBar.IsChecked == true;
         _settings.EnableMicaBackdrop = ChkMicaBackdrop.IsChecked == true;
         _settings.RequirePinOnStartup = ChkRequirePinOnStartup.IsChecked == true;
@@ -3197,5 +3220,128 @@ public partial class MainWindow : Window
             _host.ToggleMute(tab);
         RefreshMediaHubUi();
         ShowToast("Tüm medya sekmeleri sessize alındı.");
+    }
+
+    // ===================== DOWNLOAD ACCELERATOR QUICK TOGGLE =====================
+
+    private async void ChkDownloadAccelQuick_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_isLoadingSettingsUi) return;
+        _settings.DownloadAcceleratorEnabled = ChkDownloadAccelQuick.IsChecked == true;
+        _host.DownloadAcceleratorEnabled = _settings.DownloadAcceleratorEnabled;
+        SyncSettingsControls();
+        await _storage.SaveSettingsAsync(_settings);
+        ShowToast(_settings.DownloadAcceleratorEnabled
+            ? $"İndirme Hızlandırıcı açıldı ({_settings.DownloadAcceleratorSegments}x paralel bağlantı)."
+            : "İndirme Hızlandırıcı kapatıldı.");
+    }
+
+    // ===================== BRAVE-STYLE E2EE SYNC & BACKUP =====================
+
+    private async void BtnGenerateSyncPhrase_Click(object sender, RoutedEventArgs e)
+    {
+        _settings.SyncPhrase = BraveSyncService.GenerateSyncPhrase();
+        TxtSyncPhrase.Text = _settings.SyncPhrase;
+        await _storage.SaveSettingsAsync(_settings);
+        ShowToast("Yeni 12 kelimelik şifreli senkronizasyon kodu üretildi.");
+    }
+
+    private void BtnCopySyncPhrase_Click(object sender, RoutedEventArgs e)
+    {
+        if (!string.IsNullOrWhiteSpace(TxtSyncPhrase.Text))
+        {
+            Clipboard.SetText(TxtSyncPhrase.Text.Trim());
+            ShowToast("Senkronizasyon kodu panoya kopyalandı.");
+        }
+    }
+
+    private async void BtnExportSync_Click(object sender, RoutedEventArgs e)
+    {
+        var phrase = TxtSyncPhrase.Text.Trim();
+        if (string.IsNullOrWhiteSpace(phrase))
+        {
+            ShowToast("Önce bir senkronizasyon kodu belirle.");
+            return;
+        }
+
+        _settings.SyncPhrase = phrase;
+        await _storage.SaveSettingsAsync(_settings);
+
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "KitBrowser Şifreli Senkronizasyon Yedeği Kaydet",
+            Filter = "KitBrowser Sync (*.kitsync)|*.kitsync",
+            FileName = $"KitBrowser-Sync-{DateTime.Now:yyyyMMdd}.kitsync"
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        try
+        {
+            var payload = new BraveSyncPayload
+            {
+                Settings = _settings,
+                Bookmarks = _bookmarks.ToList(),
+                Notes = _notes.ToList(),
+                ReadingList = _readingList.ToList()
+            };
+            await BraveSyncService.ExportEncryptedAsync(dlg.FileName, phrase, payload);
+            ShowToast("Şifreli yedek (.kitsync) AES-256 ile kaydedildi.");
+        }
+        catch (Exception ex)
+        {
+            ShowToast($"Yedekleme hatası: {ex.Message}");
+        }
+    }
+
+    private async void BtnImportSync_Click(object sender, RoutedEventArgs e)
+    {
+        var phrase = TxtSyncPhrase.Text.Trim();
+        if (string.IsNullOrWhiteSpace(phrase))
+        {
+            ShowToast("Yedeği açmak için 12 kelimelik senkronizasyon kodunu gir.");
+            return;
+        }
+
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "KitBrowser Şifreli Senkronizasyon Yedeği Seç",
+            Filter = "KitBrowser Sync (*.kitsync)|*.kitsync"
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        try
+        {
+            var payload = await BraveSyncService.ImportEncryptedAsync(dlg.FileName, phrase);
+            if (payload is null)
+            {
+                ShowToast("Yedek okunamadı.");
+                return;
+            }
+
+            if (payload.Settings is not null)
+            {
+                payload.Settings.SyncPhrase = phrase;
+                _settings = payload.Settings;
+                await _storage.SaveSettingsAsync(_settings);
+                App.ApplyTheme(_settings.Theme, _settings.AccentColor);
+                SyncSettingsControls();
+            }
+
+            foreach (var bm in payload.Bookmarks)
+                await _storage.AddBookmarkAsync(bm.Title, bm.Url);
+            foreach (var note in payload.Notes)
+                await _storage.SaveNoteAsync(note);
+            foreach (var rl in payload.ReadingList)
+                await _storage.AddReadingItemAsync(rl.Title, rl.Url);
+
+            await RefreshBookmarksAsync();
+            await RefreshNotesAsync();
+            await RefreshReadingListAsync();
+            ShowToast($"Yedek geri yüklendi ({payload.Bookmarks.Count} yer imi, {payload.Notes.Count} not).");
+        }
+        catch
+        {
+            ShowToast("Kod hatalı veya dosya bozuk (AES-256 doğrulama başarısız).");
+        }
     }
 }

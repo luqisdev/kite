@@ -6,6 +6,8 @@ using System.IO;
 using System.IO.Pipes;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -734,5 +736,256 @@ public static class TranslationService
         {
             return null;
         }
+    }
+}
+
+// ===================== MULTI-CONNECTION DOWNLOAD ACCELERATOR =====================
+
+public static class DownloadAcceleratorService
+{
+    private const long MinAcceleratedBytes = 1024 * 1024; // 1 MB threshold
+    private static readonly HttpClient Http = new(new SocketsHttpHandler
+    {
+        MaxConnectionsPerServer = 32,
+        AutomaticDecompression = DecompressionMethods.None,
+        AllowAutoRedirect = true,
+        PooledConnectionLifetime = TimeSpan.FromMinutes(2)
+    })
+    {
+        Timeout = TimeSpan.FromMinutes(30)
+    };
+
+    public static async Task<(bool Supported, long ContentLength)> ProbeRangeSupportAsync(
+        string url, string cookieHeader, string userAgent)
+    {
+        if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+            !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            return (false, 0);
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.Range = new RangeHeaderValue(0, 0);
+            if (!string.IsNullOrWhiteSpace(userAgent))
+                req.Headers.TryAddWithoutValidation("User-Agent", userAgent);
+            if (!string.IsNullOrWhiteSpace(cookieHeader))
+                req.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
+
+            using var resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
+            if (resp.StatusCode == HttpStatusCode.PartialContent &&
+                resp.Content.Headers.ContentRange?.Length is { } totalLength &&
+                totalLength >= MinAcceleratedBytes)
+            {
+                return (true, totalLength);
+            }
+        }
+        catch { }
+
+        return (false, 0);
+    }
+
+    public static async Task DownloadMultiConnectionAsync(
+        DownloadItem item,
+        long totalBytes,
+        int requestedSegments,
+        string cookieHeader,
+        string userAgent,
+        Action<Action> dispatchUi,
+        Func<Task> persistAsync)
+    {
+        var segments = Math.Clamp(requestedSegments, 2, 16);
+        if (totalBytes < segments * 256L * 1024L)
+            segments = Math.Max(2, (int)(totalBytes / (256L * 1024L)));
+
+        var dir = Path.GetDirectoryName(item.SavePath);
+        if (!string.IsNullOrEmpty(dir))
+            Directory.CreateDirectory(dir);
+
+        long downloaded = 0;
+        var sw = Stopwatch.StartNew();
+        long lastUiTick = 0;
+
+        dispatchUi(() =>
+        {
+            item.TotalBytes = totalBytes;
+            item.Status = "İndiriliyor";
+            item.SpeedText = $"{segments}x Hızlandırıcı";
+        });
+
+        try
+        {
+            using var handle = File.OpenHandle(
+                item.SavePath,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.None,
+                FileOptions.Asynchronous,
+                preallocationSize: totalBytes);
+
+            var chunkSize = totalBytes / segments;
+            var tasks = new Task[segments];
+
+            for (int i = 0; i < segments; i++)
+            {
+                long start = i * chunkSize;
+                long end = (i == segments - 1) ? (totalBytes - 1) : ((i + 1) * chunkSize - 1);
+
+                tasks[i] = Task.Run(async () =>
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Get, item.Url);
+                    req.Headers.Range = new RangeHeaderValue(start, end);
+                    if (!string.IsNullOrWhiteSpace(userAgent))
+                        req.Headers.TryAddWithoutValidation("User-Agent", userAgent);
+                    if (!string.IsNullOrWhiteSpace(cookieHeader))
+                        req.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
+
+                    using var resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+                    resp.EnsureSuccessStatusCode();
+
+                    await using var stream = await resp.Content.ReadAsStreamAsync().ConfigureAwait(false);
+                    var buffer = new byte[64 * 1024];
+                    long writeOffset = start;
+                    int read;
+
+                    while ((read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length)).ConfigureAwait(false)) > 0)
+                    {
+                        await RandomAccess.WriteAsync(handle, buffer.AsMemory(0, read), writeOffset).ConfigureAwait(false);
+                        writeOffset += read;
+
+                        var totalNow = Interlocked.Add(ref downloaded, read);
+                        var nowMs = sw.ElapsedMilliseconds;
+                        var prevMs = Interlocked.Read(ref lastUiTick);
+                        if (nowMs - prevMs >= 180 && Interlocked.CompareExchange(ref lastUiTick, nowMs, prevMs) == prevMs)
+                        {
+                            var secs = Math.Max(0.1, sw.Elapsed.TotalSeconds);
+                            var mbps = (totalNow / (1024.0 * 1024.0)) / secs;
+                            dispatchUi(() =>
+                            {
+                                item.BytesReceived = totalNow;
+                                item.SpeedText = $"{segments}x Hızlandırıcı • {mbps:F1} MB/s";
+                            });
+                        }
+                    }
+                });
+            }
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+
+            var finalSecs = Math.Max(0.1, sw.Elapsed.TotalSeconds);
+            var avgMbps = (totalBytes / (1024.0 * 1024.0)) / finalSecs;
+            dispatchUi(() =>
+            {
+                item.BytesReceived = totalBytes;
+                item.TotalBytes = totalBytes;
+                item.SpeedText = $"{segments}x • Ort. {avgMbps:F1} MB/s";
+                item.Status = "Tamamlandı";
+            });
+        }
+        catch
+        {
+            dispatchUi(() =>
+            {
+                item.SpeedText = string.Empty;
+                item.Status = "İptal Edildi";
+            });
+            try { if (File.Exists(item.SavePath)) File.Delete(item.SavePath); } catch { }
+        }
+        finally
+        {
+            try { await persistAsync().ConfigureAwait(false); } catch { }
+        }
+    }
+}
+
+// ===================== BRAVE-STYLE E2EE SYNC (12-WORD PHRASE + AES-256-GCM) =====================
+
+public sealed class BraveSyncPayload
+{
+    public DateTime ExportedAtUtc { get; set; } = DateTime.UtcNow;
+    public BrowserSettings? Settings { get; set; }
+    public List<BookmarkItem> Bookmarks { get; set; } = new();
+    public List<NoteItem> Notes { get; set; } = new();
+    public List<ReadingListItem> ReadingList { get; set; } = new();
+}
+
+public static class BraveSyncService
+{
+    private static readonly string[] WordList =
+    [
+        "kartal", "bulut", "deniz", "yildiz", "orman", "dalga", "gunes", "ruzgar",
+        "kaya", "nehir", "liman", "fener", "pusula", "zirve", "vadi", "sahil",
+        "kristal", "zumrut", "safir", "kehribar", "atlas", "kuzey", "guney", "dogu",
+        "bati", "ufuk", "seher", "mehtap", "yagmur", "kar", "sis", "simsek",
+        "poyraz", "lodos", "marti", "sahin", "aslan", "kurt", "geyik", "yunus",
+        "cedir", "cinar", "defne", "zeytin", "lavanta", "orkide", "lale", "nilufer",
+        "kale", "kopru", "kule", "bahce", "patika", "ada", "korfez", "bozkir",
+        "sancak", "yelken", "dumen", "demir", "altin", "gumus", "bakir", "mermer"
+    ];
+
+    public static string GenerateSyncPhrase()
+    {
+        var words = new string[12];
+        for (int i = 0; i < words.Length; i++)
+            words[i] = WordList[RandomNumberGenerator.GetInt32(WordList.Length)];
+        return string.Join(' ', words);
+    }
+
+    private static byte[] DeriveKey(string phrase, byte[] salt)
+        => Rfc2898DeriveBytes.Pbkdf2(
+            Encoding.UTF8.GetBytes(phrase.Trim().ToLowerInvariant()),
+            salt,
+            100_000,
+            HashAlgorithmName.SHA256,
+            32);
+
+    public static async Task ExportEncryptedAsync(string filePath, string syncPhrase, BraveSyncPayload payload)
+    {
+        var plainBytes = JsonSerializer.SerializeToUtf8Bytes(payload);
+        var salt = RandomNumberGenerator.GetBytes(16);
+        var nonce = RandomNumberGenerator.GetBytes(12);
+        var key = DeriveKey(syncPhrase, salt);
+        var cipher = new byte[plainBytes.Length];
+        var tag = new byte[16];
+
+        using (var aes = new AesGcm(key, 16))
+            aes.Encrypt(nonce, plainBytes, cipher, tag);
+
+        using var ms = new MemoryStream();
+        ms.Write("KSYN1"u8); // Magic header v1
+        ms.Write(salt);
+        ms.Write(nonce);
+        ms.Write(tag);
+        ms.Write(cipher);
+
+        await File.WriteAllBytesAsync(filePath, ms.ToArray()).ConfigureAwait(false);
+    }
+
+    public static async Task<BraveSyncPayload?> ImportEncryptedAsync(string filePath, string syncPhrase)
+    {
+        var raw = await File.ReadAllBytesAsync(filePath).ConfigureAwait(false);
+        return DecryptPayload(raw, syncPhrase);
+    }
+
+    private static BraveSyncPayload? DecryptPayload(byte[] raw, string syncPhrase)
+    {
+        if (raw.Length < 5 + 16 + 12 + 16)
+            throw new InvalidDataException("Geçersiz .kitsync dosyası.");
+
+        var span = raw.AsSpan();
+        if (!span[..5].SequenceEqual("KSYN1"u8))
+            throw new InvalidDataException("Desteklenmeyen senkronizasyon dosyası biçimi.");
+
+        var salt = span.Slice(5, 16).ToArray();
+        var nonce = span.Slice(21, 12);
+        var tag = span.Slice(33, 16);
+        var cipher = span[49..];
+        var plain = new byte[cipher.Length];
+        var key = DeriveKey(syncPhrase, salt);
+
+        using (var aes = new AesGcm(key, 16))
+            aes.Decrypt(nonce, cipher, tag, plain);
+
+        return JsonSerializer.Deserialize<BraveSyncPayload>(plain);
     }
 }

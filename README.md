@@ -21,6 +21,8 @@
 
 ### Productivity & Modern UI
 - **Modern Horizontal Tabs & Hover Previews:** Minimalist horizontal tab bar with live thumbnail hover preview cards, drag-and-drop reordering, pinned tabs, audio/mute indicators, and optional colored tab groups.
+- **Toggleable Download Accelerator:** Multi-connection HTTP Range downloader (4x/8x/16x parallel segments) that can be toggled on/off from `kite://downloads` or `kite://settings`.
+- **Brave-Style OAuth Popups & Encrypted Sync:** Seamless Google/OAuth popup login support plus accountless 12-word AES-256-GCM encrypted backup & sync (`.kitsync`).
 - **Global Media Control Hub:** Control play/pause, ±10s seek, mute, PiP, and playback speed across all background audio/video tabs from a single toolbar button.
 - **Built-in Page & Selection Translator:** One-click in-place Turkish page translation from the address bar and instant right-click selection translation popup.
 - **Windows Default Browser & Delta Auto-Updates:** Register as Windows default browser (`http`/`https`/`.html`) with single-instance link handoff, plus Velopack Delta auto-updates.

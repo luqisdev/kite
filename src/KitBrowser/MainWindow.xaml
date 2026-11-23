@@ -1186,6 +1186,28 @@
 
                                                 <Separator Margin="0,0,0,14" />
 
+                                                <Grid Margin="0,0,0,14">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,12,0">
+                                                        <TextBlock Text="İndirme Hızlandırıcı Modülü (Çoklu Bağlantı)" Foreground="{DynamicResource TextPrimary}" FontSize="13" FontWeight="Medium" />
+                                                        <TextBlock Text="1 MB üstü dosyaları paralel parçalara bölerek IDM tarzı hızlandırır" Foreground="{DynamicResource TextMuted}" FontSize="11.5" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <ComboBox x:Name="CmbDownloadSegments" Width="118" Height="32" Margin="0,0,10,0" SelectionChanged="SettingControl_Changed">
+                                                            <ComboBoxItem Content="4x Bağlantı" Tag="4" />
+                                                            <ComboBoxItem Content="8x Bağlantı" Tag="8" />
+                                                            <ComboBoxItem Content="16x Bağlantı" Tag="16" />
+                                                        </ComboBox>
+                                                        <CheckBox x:Name="ChkDownloadAccelerator" Style="{StaticResource ToggleSwitch}"
+                                                                  Checked="SettingControl_Changed" Unchecked="SettingControl_Changed" />
+                                                    </StackPanel>
+                                                </Grid>
+
+                                                <Separator Margin="0,0,0,14" />
+
                                                 <Grid>
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="*" />
@@ -1328,6 +1350,29 @@
                                                     <Button x:Name="BtnSetDefaultBrowser" Grid.Column="1" Style="{StaticResource AccentBtn}" Content="Varsayılan Tarayıcı Yap"
                                                             Click="BtnSetDefaultBrowser_Click" />
                                                 </Grid>
+
+                                                <Separator Margin="0,0,0,14" />
+
+                                                <!-- Brave-Style E2EE Sync -->
+                                                <StackPanel Margin="0,0,0,14">
+                                                    <TextBlock Text="Şifreli Senkronizasyon &amp; Yedekleme (Brave Tarzı • Hesapsız)" Foreground="{DynamicResource TextPrimary}" FontSize="13" FontWeight="Medium" />
+                                                    <TextBlock Text="12 kelimelik gizli kodunla yer imleri, ayarlar, hızlı erişim ve notlarını AES-256 ile şifrele" Foreground="{DynamicResource TextMuted}" FontSize="11.5" Margin="0,2,0,8" />
+                                                    <Grid Margin="0,0,0,8">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBox x:Name="TxtSyncPhrase" Grid.Column="0" Style="{StaticResource ModernInput}" Height="32" Margin="0,0,8,0" ToolTip="12 kelimelik gizli senkronizasyon kodun" />
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                            <Button Style="{StaticResource SubtleBtn}" Content="Yeni Kod" Height="32" Margin="0,0,6,0" Click="BtnGenerateSyncPhrase_Click" />
+                                                            <Button Style="{StaticResource SubtleBtn}" Content="Kopyala" Height="32" Click="BtnCopySyncPhrase_Click" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <Button Style="{StaticResource AccentBtn}" Content="Şifreli Yedekle (.kitsync)" Margin="0,0,8,0" Click="BtnExportSync_Click" />
+                                                        <Button Style="{StaticResource SubtleBtn}" Content="Yedekten Geri Yükle" Click="BtnImportSync_Click" />
+                                                    </StackPanel>
+                                                </StackPanel>
 
                                                 <Separator Margin="0,0,0,14" />
 
@@ -1530,6 +1575,24 @@
                                         </ItemsControl>
 
                                         <!-- Full-Page Downloads -->
+                                        <Border x:Name="DownloadsAcceleratorBar" Visibility="Collapsed"
+                                                Padding="14,10" Margin="0,0,0,12" CornerRadius="11"
+                                                Background="{DynamicResource BgSurface}"
+                                                BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                                    <TextBlock Text="⚡ İndirme Hızlandırıcı Modülü" Foreground="{DynamicResource TextPrimary}" FontSize="13" FontWeight="SemiBold" />
+                                                    <TextBlock x:Name="TxtDownloadsAccelInfo" Text="Çoklu paralel bağlantı ile yüksek hızlı indirme" Foreground="{DynamicResource TextMuted}" FontSize="11.5" />
+                                                </StackPanel>
+                                                <CheckBox x:Name="ChkDownloadAccelQuick" Grid.Column="1" Style="{StaticResource ToggleSwitch}"
+                                                          Checked="ChkDownloadAccelQuick_Changed" Unchecked="ChkDownloadAccelQuick_Changed" />
+                                            </Grid>
+                                        </Border>
+
                                         <ItemsControl x:Name="FullDownloadsList" Visibility="Collapsed">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>

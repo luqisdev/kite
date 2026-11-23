@@ -516,12 +516,26 @@ public sealed class DownloadItem : INotifyPropertyChanged
     private string _status = "İndiriliyor";
     private long _bytesReceived;
     private long _totalBytes;
+    private string _speedText = string.Empty;
 
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string FileName { get; set; } = string.Empty;
     public string Url { get; set; } = string.Empty;
     public string SavePath { get; set; } = string.Empty;
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+
+    [JsonIgnore]
+    public string SpeedText
+    {
+        get => _speedText;
+        set
+        {
+            if (_speedText == value) return;
+            _speedText = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ProgressText));
+        }
+    }
 
     public string Status
     {
@@ -568,7 +582,8 @@ public sealed class DownloadItem : INotifyPropertyChanged
             if (TotalBytes > 0)
             {
                 var pct = (int)Math.Clamp((BytesReceived * 100L) / TotalBytes, 0, 100);
-                return $"{pct}% • {FormatBytes(BytesReceived)} / {FormatBytes(TotalBytes)}";
+                var speedSuffix = string.IsNullOrWhiteSpace(SpeedText) ? string.Empty : $" • {SpeedText}";
+                return $"{pct}% • {FormatBytes(BytesReceived)} / {FormatBytes(TotalBytes)}{speedSuffix}";
             }
             return BytesReceived > 0 ? $"{Status} • {FormatBytes(BytesReceived)}" : Status;
         }
@@ -643,6 +658,9 @@ public sealed class BrowserSettings
     public bool RequirePinOnStartup { get; set; }
     public bool AutoCheckUpdates { get; set; } = true;
     public string UpdateFeedUrl { get; set; } = "https://github.com/luqisdev/kite";
+    public bool DownloadAcceleratorEnabled { get; set; } = true;
+    public int DownloadAcceleratorSegments { get; set; } = 8;
+    public string? SyncPhrase { get; set; }
     public List<SpeedDialItem> SpeedDial { get; set; } =
     [
         new() { Id = "sd1", Title = "Google", Url = "https://www.google.com" },

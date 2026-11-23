@@ -91,6 +91,8 @@ public sealed class TabHostController : IDisposable
     public event Action<PageContextMenuRequest>? PageContextMenuRequested;
 
     public bool IsDevToolsActive { get; set; }
+    public bool DownloadAcceleratorEnabled { get; set; } = true;
+    public int DownloadAcceleratorSegments { get; set; } = 8;
 
     public TabItemModel? SplitTab => _splitTab;
 
@@ -933,6 +935,14 @@ public sealed class TabHostController : IDisposable
         core.Settings.IsStatusBarEnabled = false;
         core.Settings.IsSwipeNavigationEnabled = true;
 
+        // Clean Chrome desktop User-Agent (removes Edg/ token so Google/OAuth logins work like Brave & Chrome)
+        if (!string.IsNullOrWhiteSpace(core.Settings.UserAgent))
+        {
+            var cleanUa = System.Text.RegularExpressions.Regex.Replace(core.Settings.UserAgent, @"\s+Edg/[\d\.]+", "");
+            core.Settings.UserAgent = cleanUa;
+            _defaultUserAgent ??= cleanUa;
+        }
+
         // Per-site Permissions (Camera, Microphone, Geolocation, Notifications)
         core.PermissionRequested += (_, e) =>
         {
@@ -1135,14 +1145,78 @@ public sealed class TabHostController : IDisposable
             ActiveTabStateChanged?.Invoke(tab);
         };
 
-        core.NewWindowRequested += (_, e) =>
+        core.NewWindowRequested += async (_, e) =>
         {
+            var uri = e.Uri ?? string.Empty;
+            bool isPopupFlow = e.WindowFeatures.HasSize ||
+                uri.Contains("accounts.google.", StringComparison.OrdinalIgnoreCase) ||
+                uri.Contains("login.microsoftonline.", StringComparison.OrdinalIgnoreCase) ||
+                uri.Contains("appleid.apple.", StringComparison.OrdinalIgnoreCase) ||
+                uri.Contains("/oauth", StringComparison.OrdinalIgnoreCase) ||
+                uri.Contains("auth.", StringComparison.OrdinalIgnoreCase);
+
+            if (isPopupFlow)
+            {
+                var deferral = e.GetDeferral();
+                try
+                {
+                    var env = await GetEnvironmentAsync();
+                    var popupWebView = new WebView2
+                    {
+                        DefaultBackgroundColor = System.Drawing.Color.FromArgb(255, 20, 23, 32)
+                    };
+                    var popupWin = new Window
+                    {
+                        Title = "KitBrowser — Oturum Aç",
+                        Width = e.WindowFeatures.HasSize && e.WindowFeatures.Width > 320 ? e.WindowFeatures.Width : 520,
+                        Height = e.WindowFeatures.HasSize && e.WindowFeatures.Height > 360 ? e.WindowFeatures.Height : 660,
+                        WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                        Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(20, 23, 32)),
+                        Content = popupWebView
+                    };
+
+                    popupWin.Show();
+                    if (tab.IsInPrivate)
+                    {
+                        var opts = env.CreateCoreWebView2ControllerOptions();
+                        opts.IsInPrivateModeEnabled = true;
+                        await popupWebView.EnsureCoreWebView2Async(env, opts);
+                    }
+                    else
+                    {
+                        await popupWebView.EnsureCoreWebView2Async(env);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(_defaultUserAgent))
+                        popupWebView.CoreWebView2.Settings.UserAgent = _defaultUserAgent;
+
+                    popupWebView.CoreWebView2.DocumentTitleChanged += (_, _) =>
+                        popupWin.Dispatcher.BeginInvoke(() => popupWin.Title = popupWebView.CoreWebView2.DocumentTitle);
+                    popupWebView.CoreWebView2.WindowCloseRequested += (_, _) =>
+                        popupWin.Dispatcher.BeginInvoke(() => popupWin.Close());
+
+                    e.NewWindow = popupWebView.CoreWebView2;
+                    e.Handled = true;
+                }
+                catch
+                {
+                    e.Handled = true;
+                    if (!string.IsNullOrWhiteSpace(uri))
+                        NewTabRequested?.Invoke(uri);
+                }
+                finally
+                {
+                    deferral.Complete();
+                }
+                return;
+            }
+
             e.Handled = true;
-            if (!string.IsNullOrWhiteSpace(e.Uri))
-                NewTabRequested?.Invoke(e.Uri);
+            if (!string.IsNullOrWhiteSpace(uri))
+                NewTabRequested?.Invoke(uri);
         };
 
-        core.DownloadStarting += (_, e) =>
+        core.DownloadStarting += async (_, e) =>
         {
             var op = e.DownloadOperation;
             var savePath = e.ResultFilePath;
@@ -1154,6 +1228,53 @@ public sealed class TabHostController : IDisposable
                 TotalBytes = op.TotalBytesToReceive.HasValue ? (long)op.TotalBytesToReceive.Value : 0,
                 Status = "İndiriliyor"
             };
+
+            if (DownloadAcceleratorEnabled &&
+                (op.Uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                 op.Uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+            {
+                var deferral = e.GetDeferral();
+                try
+                {
+                    string cookieHeader = string.Empty;
+                    try
+                    {
+                        var cookies = await core.CookieManager.GetCookiesAsync(op.Uri);
+                        if (cookies.Count > 0)
+                            cookieHeader = string.Join("; ", cookies.Select(c => $"{c.Name}={c.Value}"));
+                    }
+                    catch { }
+
+                    var ua = core.Settings.UserAgent ?? string.Empty;
+                    var (supported, contentLength) = await DownloadAcceleratorService.ProbeRangeSupportAsync(op.Uri, cookieHeader, ua);
+                    if (supported)
+                    {
+                        e.Cancel = true;
+                        e.Handled = true;
+                        deferral.Complete();
+
+                        item.TotalBytes = contentLength;
+                        DownloadStarted?.Invoke(item);
+                        if (!tab.IsInPrivate)
+                            _ = Task.Run(() => _storage.UpsertDownloadAsync(item));
+
+                        _ = DownloadAcceleratorService.DownloadMultiConnectionAsync(
+                            item,
+                            contentLength,
+                            DownloadAcceleratorSegments,
+                            cookieHeader,
+                            ua,
+                            act => _primaryHostGrid.Dispatcher.BeginInvoke(act),
+                            () => tab.IsInPrivate ? Task.CompletedTask : _storage.UpsertDownloadAsync(item));
+                        return;
+                    }
+                }
+                catch { }
+                finally
+                {
+                    try { deferral.Complete(); } catch { }
+                }
+            }
 
             DownloadStarted?.Invoke(item);
             if (!tab.IsInPrivate)
